@@ -2,7 +2,7 @@
 
 This repository contains code for the model described in 
 
-Harrison-Atlas, D., Glaws, A., King, R. N., and Lantz, E. "Scaling wind power innovation assessment for rapid energy transition with artificial intelligence". Under review at Nature Energy.
+Harrison-Atlas, D., Glaws, A., King, R. N., and Lantz, E. "Fleet-wide potential of wind plant controls for land use and economic objectives". Under review at Nature Energy.
 
 ___
 
