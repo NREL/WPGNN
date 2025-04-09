@@ -2,7 +2,7 @@
 
 This repository contains code for the model described in 
 
-Harrison-Atlas, D., Glaws, A., King, R. N., and Lantz, E. "Artificial intelligence-aided wind plant optimization for nationwide evaluation of land use and economic benefits of wake steering." In press at Nature Energy.
+Harrison-Atlas, D., Glaws, A., King, R. N., and Lantz, E. "Artificial intelligence-aided wind plant optimization for nationwide evaluation of land use and economic benefits of wake steering." Nature Energy (2024). [https://doi.org/10.1038/s41560-024-01516-8](https://doi.org/10.1038/s41560-024-01516-8).
 
 ___
 
