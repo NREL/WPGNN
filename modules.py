@@ -1,132 +1,132 @@
-import tensorflow as tf
-import sonnet as snt
+import torch
+import torch.nn as nn
+from torch.nn import Sequential as Seq, Linear as Lin, ReLU, LeakyReLU
+from torch_geometric.utils import scatter
 
-class EdgeUpdate(snt.Module):
 
-    def __init__(self, input_size, output_size, layer_sizes=None, output_activation=False, 
-                       w_init=None, b_init=None, name=None):
-        super(EdgeUpdate, self).__init__(name=name)
-        self.input_size, self.output_size = input_size, output_size
+class EdgeModel(nn.Module):
+    def __init__(self, dim_in, dim_out, n_layers=3, output_activation='relu', layer_index=0):
+        super().__init__()
+        # Input: edge + 2*node + global
+        edge_inputs, edge_outputs = dim_in[0] + 2*dim_in[1] + dim_in[2], dim_out[0]
+        layer_sizes = [edge_outputs] if n_layers == 1 else [edge_outputs for _ in range(n_layers-1)]
+        self.n_layers = len(layer_sizes)
         self.output_activation = output_activation
 
-        layer_sizes = [output_size] if layer_sizes is None else layer_sizes
-        self.n_layers = len(layer_sizes)
-
-        self.layers = []
+        self.edge_mlp = []
         for i in range(self.n_layers):
-            self.layers.append(snt.Linear(layer_sizes[i], 
-                                          w_init=w_init,
-                                          b_init=b_init, 
-                                          name='linear{0:03d}'.format(i)))
-        self.layers.append(snt.Linear(output_size, 
-                                      w_init=w_init,
-                                      b_init=b_init, 
-                                      name='linear_out'))
-
-    def __call__(self, x):
-        for layer in self.layers[:-1]:
-            x = layer(x)
-            x = tf.nn.leaky_relu(x)
-
-        x = self.layers[-1](x)
+            self.edge_mlp.append(Lin(edge_inputs if i == 0 else layer_sizes[i-1], layer_sizes[i]))
+            self.edge_mlp.append(LeakyReLU())
+        self.edge_mlp.append(Lin(layer_sizes[-1], edge_outputs))
         if self.output_activation == 'leaky_relu':
-            x = tf.nn.leaky_relu(x)
+            self.edge_mlp.append(LeakyReLU())
         elif self.output_activation == 'relu':
-            x = tf.nn.relu(x)
+            self.edge_mlp.append(ReLU())
         elif self.output_activation == 'softplus':
-            x = tf.nn.softplus(x)
+            self.edge_mlp.append(nn.Softplus())
         elif self.output_activation == 'sigmoid':
-            x = tf.nn.sigmoid(x)
-        elif self.output_activation == 'none':
-            pass
-        else:
-            assert self.output_activation == False
+            self.edge_mlp.append(nn.Sigmoid())
+        self.edge_mlp = Seq(*self.edge_mlp)
+    
+    def forward(self, src, dst, edge_attr, u, batch):
+        # src, dst: [E, F_x], where E is the number of edges.
+        # edge_attr: [E, F_e]
+        # u: [B, F_u]
+        # batch: [E] with max entry B - 1.
+        
+        # u = u.unsqueeze(0).repeat(src.size(0), 1) if u.dim() == 1 else u        # Make u the same size as src/dst
+        # print("Shape check on EdgeModel: ", src.shape, dst.shape, edge_attr.shape, u.shape)
+        out = torch.cat([src, dst, edge_attr, u[batch]], dim=1)
+        out = self.edge_mlp(out)
 
-        return x
+        return out
 
-class NodeUpdate(snt.Module):
+class NodeModel(nn.Module):
+    def __init__(self, dim_in, dim_out, n_layers=3, output_activation='relu', layer_index=0):
+        super().__init__()
 
-    def __init__(self, input_size, output_size, layer_sizes=None, output_activation=False, 
-                       w_init=None, b_init=None, name=None):
-        super(NodeUpdate, self).__init__(name=name)
-        self.input_size, self.output_size = input_size, output_size
+        # Input: 2*edge + node + global
+        # Note: Using dim_out[0] as edges have already been updated
+        node_inputs, node_outputs = 2*dim_out[0] + dim_in[1] + dim_in[2], dim_out[1]
+        layer_sizes = [node_outputs] if n_layers == 1 else [node_outputs for _ in range(n_layers-1)]
+        self.n_layers = len(layer_sizes)
         self.output_activation = output_activation
 
-        layer_sizes = [output_size] if layer_sizes is None else layer_sizes
-        self.n_layers = len(layer_sizes)
-
-        self.layers = []
+        self.node_mlp = []
         for i in range(self.n_layers):
-            self.layers.append(snt.Linear(layer_sizes[i], 
-                                          w_init=w_init,
-                                          b_init=b_init, 
-                                          name='linear{0:03d}'.format(i)))
-        self.layers.append(snt.Linear(output_size, 
-                                      w_init=w_init,
-                                      b_init=b_init, 
-                                      name='linear_out'))
-
-    def __call__(self, x):
-        for layer in self.layers[:-1]:
-            x = layer(x)
-            x = tf.nn.leaky_relu(x)
-
-        x = self.layers[-1](x)
+            self.node_mlp.append(Lin(node_inputs if i == 0 else layer_sizes[i-1], layer_sizes[i]))
+            self.node_mlp.append(LeakyReLU())
+        self.node_mlp.append(Lin(layer_sizes[-1], node_outputs))
         if self.output_activation == 'leaky_relu':
-            x = tf.nn.leaky_relu(x)
+            self.node_mlp.append(LeakyReLU())
         elif self.output_activation == 'relu':
-            x = tf.nn.relu(x)
+            self.node_mlp.append(ReLU())
         elif self.output_activation == 'softplus':
-            x = tf.nn.softplus(x)
+            self.node_mlp.append(nn.Softplus())
         elif self.output_activation == 'sigmoid':
-            x = tf.nn.sigmoid(x)
-        elif self.output_activation == 'none':
-            pass
-        else:
-            assert self.output_activation == False
+            self.node_mlp.append(nn.Sigmoid())
+        self.node_mlp = Seq(*self.node_mlp)
+    
+    def forward(self, x, edge_index, edge_attr, u, batch):
+        # x: [N, F_x], where N is the number of nodes.
+        # edge_index: [2, E] with max entry N - 1.
+        # edge_attr: [E, F_e]
+        # u: [B, F_u], where B is the number of graphs.
+        # batch: [N] with max entry B - 1.
+        row, col = edge_index
 
-        return x
+        # Aggregate received edges (incoming messages to each node)
+        received = scatter(edge_attr, col, dim=0, dim_size=x.size(0), reduce='mean')
 
-class GlobalUpdate(snt.Module):
+        # Aggregate sent edges (outgoing messages to each node)
+        sent = scatter(edge_attr, row, dim=0, dim_size=x.size(0), reduce='mean')
 
-    def __init__(self, input_size, output_size, layer_sizes=None, output_activation=False, 
-                       w_init=None, b_init=None, name=None):
-        super(GlobalUpdate, self).__init__(name=name)
-        self.input_size, self.output_size = input_size, output_size
+        # Concatenate: received +sent + node + global[batch]
+        # print("Shape check on NodeModel: ", received.shape, sent.shape, x.shape, u.shape)
+        out = torch.cat([received, sent, x, u[batch]], dim=1)
+        out = self.node_mlp(out)
+
+        return out
+
+
+class GlobalModel(nn.Module):
+    def __init__(self, dim_in, dim_out, n_layers=3, output_activation='relu', layer_index=0):
+        super().__init__()
+        
+        # Input: edge + node + global
+        # Note: Using dim_out[0] and dim_out[1] as edges and nodes have already been updated
+        global_inputs, global_outputs = dim_out[0] + dim_out[1] + dim_in[2], dim_out[2]
+        layer_sizes = [global_outputs] if n_layers == 1 else [global_outputs for _ in range(n_layers-1)]
+        self.n_layers = len(layer_sizes)
         self.output_activation = output_activation
 
-        layer_sizes = [output_size] if layer_sizes is None else layer_sizes
-        self.n_layers = len(layer_sizes)
-
-        self.layers = []
+        self.global_mlp = []
         for i in range(self.n_layers):
-            self.layers.append(snt.Linear(layer_sizes[i], 
-                                          w_init=w_init,
-                                          b_init=b_init, 
-                                          name='linear{0:03d}'.format(i)))
-        self.layers.append(snt.Linear(output_size, 
-                                      w_init=w_init,
-                                      b_init=b_init, 
-                                      name='linear_out'))
-
-    def __call__(self, x):
-        for layer in self.layers[:-1]:
-            x = layer(x)
-            x = tf.nn.leaky_relu(x)
-
-        x = self.layers[-1](x)
+            self.global_mlp.append(Lin(global_inputs if i == 0 else layer_sizes[i-1], layer_sizes[i]))
+            self.global_mlp.append(LeakyReLU())
+        self.global_mlp.append(Lin(layer_sizes[-1], global_outputs))
         if self.output_activation == 'leaky_relu':
-            x = tf.nn.leaky_relu(x)
+            self.global_mlp.append(LeakyReLU())
         elif self.output_activation == 'relu':
-            x = tf.nn.relu(x)
+            self.global_mlp.append(ReLU())
         elif self.output_activation == 'softplus':
-            x = tf.nn.softplus(x)
+            self.global_mlp.append(nn.Softplus())
         elif self.output_activation == 'sigmoid':
-            x = tf.nn.sigmoid(x)
-        elif self.output_activation == 'none':
-            pass
-        else:
-            assert self.output_activation == False
+            self.global_mlp.append(nn.Sigmoid())
+        self.global_mlp = Seq(*self.global_mlp)
 
-        return x
+    
+    def forward(self, x, edge_index, edge_attr, u, batch):
+        # x: [N, F_x], where N is the number of nodes.
+        # edge_index: [2, E] with max entry N - 1.
+        # edge_attr: [E, F_e]
+        # u: [B, F_u], where B is the number of graphs.
+        # batch: [N] with max entry B - 1.
+        
+        row, col = edge_index
+        n_aggr = scatter(x, batch, dim=0, dim_size=u.size(0), reduce='mean')
+        e_aggr = scatter(edge_attr, batch[col], dim=0, dim_size=u.size(0), reduce='mean')
+        out = torch.cat([e_aggr, n_aggr, u], dim=1)
+        out = self.global_mlp(out)
 
+        return out
