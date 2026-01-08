@@ -1,0 +1,16 @@
+name: wpgnn_env_pytorch
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - pip
+  - python=3.12
+  - pip:
+      - h5py
+      - matplotlib
+      - numpy
+      - pandas
+      - scipy
+      - tabulate
+      - torch==2.8.0
+      - torch-geometric==2.7.0
