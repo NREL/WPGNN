@@ -3,12 +3,9 @@ import h5py
 import pickle
 import torch
 import numpy as np
-from glob import glob
-from time import time
 import networkx as nx
 from scipy.sparse.csgraph import minimum_spanning_tree
 from scipy.spatial import distance_matrix
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 from torch_geometric.data import Data
 import torch_geometric.utils
@@ -200,7 +197,7 @@ def norm_data(g_x=None, g_f=None, sf_x=None, sf_f=None):
 
         U_f = (U_f - sf_f['graph'][0])/sf_f['graph'][1]
         X_f = (X_f - sf_f['node'][0])/sf_f['node'][1]
-        A_f = (A_f - sf_f['edge'][0])/sf_f['edge'][1]
+        # A_f = (A_f - sf_f['edge'][0])/sf_f['edge'][1]
 
         g_f = Data(y=torch.tensor(U_f, dtype=torch.float),
                    x=torch.tensor(X_f, dtype=torch.float), 
@@ -211,7 +208,7 @@ def norm_data(g_x=None, g_f=None, sf_x=None, sf_f=None):
         return g_x, g_f
     elif (g_x is not None):
         return g_x
-    elif (g_x is not None):
+    elif (g_f is not None):
         return g_f
 
 def unnorm_data(g_x=None, g_f=None, sf_x=None, sf_f=None):
@@ -240,7 +237,7 @@ def unnorm_data(g_x=None, g_f=None, sf_x=None, sf_f=None):
 
         U_f = sf_f['graph'][1]*U_f + sf_f['graph'][0]
         X_f = sf_f['node'][1]*X_f + sf_f['node'][0]
-        A_f = sf_f['edge'][1]*A_f + sf_f['edge'][0]
+        # A_f = sf_f['edge'][1]*A_f + sf_f['edge'][0]
 
         g_f = Data(y=torch.tensor(U_f, dtype=torch.float),
                    x=torch.tensor(X_f, dtype=torch.float), 
@@ -251,7 +248,7 @@ def unnorm_data(g_x=None, g_f=None, sf_x=None, sf_f=None):
         return g_x, g_f
     elif (g_x is not None):
         return g_x
-    elif (g_x is not None):
+    elif (g_f is not None):
         return g_f
 
 

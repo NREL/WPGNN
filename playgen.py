@@ -148,7 +148,7 @@ class PLayGen():
         # Randomly distrbute N_turbs turbines across N_strings strings
         #   - Each string contains at least 2 turbines and no more than 75% of the total number of turbines
         max_turbs = int(0.75*N_turbs)
-        N_turbs_per_string = 2*np.ones((N_string, ), dtype=np.int)
+        N_turbs_per_string = 2*np.ones((N_string, ), dtype=int)
         count = 0
         while np.sum(N_turbs_per_string) < N_turbs:
             count += 1

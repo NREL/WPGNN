@@ -75,7 +75,7 @@ class WPGNN(nn.Module):
             x, edge_attr, u = meta_layer(x, edge_index, edge_attr, u, batch)
         
         # return output graph
-        return Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=u.reshape(-1), batch=batch)
+        return Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=u.reshape(-1))
     
     def loss(self, pred, label):
         # Compute the mean squared error for the target turbine- and plant-level outputs
@@ -96,21 +96,22 @@ class WPGNN(nn.Module):
         print(f"Number of parameters: {count_parameters(self)}")
 
     
-    def fit(self, train_loader, test_loader, optimizer, scheduler=None, n_epochs=10, save_model_path=None, batch_reporting=False):
+    def fit(self, train_loader, val_loader=None, optimizer=None, scheduler=None, n_epochs=10, save_model_path=None, batch_reporting=False):
         '''
             Parameters:
-                train_data       - training data in (list of input graphs, list of output graphs) format
-                test_data        - test data used to monitor training progress, same format as training data
-                batch_size       - number of samples to include in each training batch
-                learning_rate    - learning rate for the training optimizer
-                decay_rate       - rate of decay for the learning rate
-                epochs           - the total number of epochs of training to perform
-                print_every      - how frequently (in training iterations) to print the batch performance
-                save_every       - how frequently (in epochs) to save the model
+                train_loader     - training data loader
+                val_loader       - validation data loader (optional)
+                optimizer        - PyTorch optimizer
+                scheduler        - learning rate scheduler (optional)
+                n_epochs         - the total number of epochs of training to perform
                 save_model_path  - path to directory where to save model during training
+                batch_reporting  - whether to print batch-level losses
         '''
         # Start training process
         self.train()
+        best_val_loss = float('inf')
+        best_epoch = 0
+        
         for epoch in range(n_epochs):
             start_time = time()
             total_loss, total_loss_tp, total_loss_ts, total_loss_pp, total_loss_pc = 0.0, 0.0, 0.0, 0.0, 0.0
@@ -138,26 +139,62 @@ class WPGNN(nn.Module):
                 total_loss_pp += loss[3].item() * f_batch.num_graphs
                 total_loss_pc += loss[4].item() * f_batch.num_graphs
                 
-                # Save current state of the model
-
-            scheduler.step() if scheduler is not None else None     # Update LR after the epoch finishes
-            if save_model_path is not None:
-                torch.save(self.state_dict(), f"{save_model_path}/wpgnn_epoch{epoch+1:03d}.pt")
-            
-            # Report epoch losses
+            # Report training epoch losses
             total_loss /= len(train_loader.dataset)
             total_loss_tp /= len(train_loader.dataset)
             total_loss_ts /= len(train_loader.dataset)
             total_loss_pp /= len(train_loader.dataset)
             total_loss_pc /= len(train_loader.dataset)
-            if isinstance(loss, tuple):
-                print(f"Training Loss: {total_loss:.6f}")
-                print(f"Turbine Power Loss: {total_loss_tp:.6f} | Turbine Speed Loss: {total_loss_ts:.6f} | Plant Power Loss: {total_loss_pp:.6f} | Plant Cabling Loss: {total_loss_pc:.6f}")
-            else:
-                print(f"Training Loss: {total_loss:.6f}")
+            
+            print(f"Training Loss: {total_loss:.6f}")
+            print(f"Turbine Power Loss: {total_loss_tp:.6f} | Turbine Speed Loss: {total_loss_ts:.6f} | Plant Power Loss: {total_loss_pp:.6f} | Plant Cabling Loss: {total_loss_pc:.6f}")
+            
+            # Evaluate on validation set if provided
+            if val_loader is not None:
+                self.eval()
+                val_total_loss, val_loss_tp, val_loss_ts, val_loss_pp, val_loss_pc = 0.0, 0.0, 0.0, 0.0, 0.0
+                
+                with torch.no_grad():
+                    for idx_batch, batch in enumerate(val_loader):
+                        x_batch, f_batch = batch
+                        pred = self(x_batch)
+                        loss = self.loss(pred, f_batch)
+                        
+                        val_total_loss += loss[0].item() * f_batch.num_graphs
+                        val_loss_tp += loss[1].item() * f_batch.num_graphs
+                        val_loss_ts += loss[2].item() * f_batch.num_graphs
+                        val_loss_pp += loss[3].item() * f_batch.num_graphs
+                        val_loss_pc += loss[4].item() * f_batch.num_graphs
+                
+                val_total_loss /= len(val_loader.dataset)
+                val_loss_tp /= len(val_loader.dataset)
+                val_loss_ts /= len(val_loader.dataset)
+                val_loss_pp /= len(val_loader.dataset)
+                val_loss_pc /= len(val_loader.dataset)
+                
+                print(f"Validation Loss: {val_total_loss:.6f}")
+                print(f"Val Turbine Power Loss: {val_loss_tp:.6f} | Val Turbine Speed Loss: {val_loss_ts:.6f} | Val Plant Power Loss: {val_loss_pp:.6f} | Val Plant Cabling Loss: {val_loss_pc:.6f}")
+                
+                # Save best model based on validation loss
+                if save_model_path is not None and val_total_loss < best_val_loss:
+                    best_val_loss = val_total_loss
+                    best_epoch = epoch + 1
+                    torch.save(self.state_dict(), f"{save_model_path}/wpgnn_best.pt")
+                    print(f"*** New best model saved with validation loss: {best_val_loss:.6f} ***")
+                
+                self.train()
+            
+
+            scheduler.step() if scheduler is not None else None     # Update LR after the epoch finishes
+            
+            # Save checkpoint model (regardless of validation performance)
+            # if save_model_path is not None:
+            #     torch.save(self.state_dict(), f"{save_model_path}/wpgnn_epoch{epoch+1:03d}.pt")
 
         print("\n" + "="*60)
         print("Training Complete!")
-        print('Time to complete: {0:02f}\n'.format(time() - start_time), flush=True)
+        print('Time to complete: {0:.2f} seconds\n'.format(time() - start_time), flush=True)
+        if val_loader is not None and save_model_path is not None:
+            print(f"Best model (Epoch {best_epoch}) saved with validation loss: {best_val_loss:.6f}")
         print("="*60)
     
